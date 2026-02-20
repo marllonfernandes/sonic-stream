@@ -5,6 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const ytDlp = require("yt-dlp-exec");
 const ConfigService = require("../config/configService");
+const GroupsService = require("../config/groupsService");
 
 // Config endpoints
 router.get("/config/path", (req, res) => {
@@ -112,6 +113,56 @@ router.post("/config/dirs", (req, res) => {
     res
       .status(500)
       .json({ error: "Failed to list directories", details: e.message });
+  }
+});
+
+// Group Endpoints
+router.get("/groups", (req, res) => {
+  try {
+    const groups = GroupsService.getGroups();
+    res.json(groups);
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: "Failed to fetch groups", details: e.message });
+  }
+});
+
+router.post("/groups", (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Group name is required" });
+    const newGroup = GroupsService.createGroup(name);
+    res.json(newGroup);
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: "Failed to create group", details: e.message });
+  }
+});
+
+router.put("/groups/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    const updatedGroup = GroupsService.updateGroup(id, updates);
+    res.json(updatedGroup);
+  } catch (e) {
+    res
+      .status(404)
+      .json({ error: "Failed to update group", details: e.message });
+  }
+});
+
+router.delete("/groups/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    GroupsService.deleteGroup(id);
+    res.json({ message: "Group deleted" });
+  } catch (e) {
+    res
+      .status(404)
+      .json({ error: "Failed to delete group", details: e.message });
   }
 });
 
@@ -396,6 +447,23 @@ router.delete("/files/:filename", (req, res) => {
     }
 
     if (deleted) {
+      // Remove file from any groups
+      try {
+        const groups = GroupsService.getGroups();
+        let updated = false;
+        for (const group of groups) {
+          if (group.files.includes(filename)) {
+            group.files = group.files.filter((f) => f !== filename);
+            updated = true;
+          }
+        }
+        if (updated) {
+          GroupsService.saveGroups(groups);
+        }
+      } catch (err) {
+        console.error("Failed to sync groups after file deletion:", err);
+      }
+
       console.log(`Deleted ${filename} and associated stems.`);
       res.json({ message: "File deleted successfully" });
     } else {
