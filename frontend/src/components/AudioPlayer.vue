@@ -320,9 +320,9 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- Tracks Container (Horizontal Scroll) -->
+            <!-- Tracks Container -->
             <div
-                class="w-full flex-1 flex items-end justify-center gap-2 md:gap-4 overflow-x-auto pb-4 scrollbar-hide mask-fade py-8">
+                class="w-full flex-1 flex items-end justify-center gap-1 sm:gap-2 md:gap-4 pb-4 py-8">
                 <template v-for="track in tracks" :key="track.id">
                     <MixerTrack :stem="track.name" :volume="stemVolumes[track.id]" :isMuted="stemMuted[track.id]"
                         :isSolo="stemSolo[track.id]" @update:volume="updateVolume(track.id, $event)"
