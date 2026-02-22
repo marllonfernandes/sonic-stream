@@ -43,14 +43,14 @@ const colorClass = computed(() => {
 
 <template>
     <div
-        class="h-full flex flex-col items-center gap-3 pt-4 pb-4 min-w-[80px] w-24 bg-moises-surface/40 backdrop-blur-sm rounded-2xl border border-white/5 hover:border-white/10 transition-all group">
+        class="h-full flex flex-col items-center gap-2 sm:gap-3 pt-3 pb-3 min-w-[60px] sm:min-w-[80px] w-16 sm:w-24 bg-moises-surface/40 backdrop-blur-sm rounded-xl sm:rounded-2xl border border-white/5 hover:border-white/10 transition-all group">
 
         <!-- Track Icon -->
-        <div class="flex flex-col items-center justify-center text-gray-400 gap-1 mt-2">
-            <div class="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center shadow-inner">
-                <i :class="icon" class="text-lg group-hover:text-white transition-colors"></i>
+        <div class="flex flex-col items-center justify-center text-gray-400 gap-1 mt-1 sm:mt-2">
+            <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-black/40 flex items-center justify-center shadow-inner">
+                <i :class="icon" class="text-base sm:text-lg group-hover:text-white transition-colors"></i>
             </div>
-            <span class="text-[10px] uppercase font-bold tracking-wider opacity-60">{{ stem.substring(0, 3) }}</span>
+            <span class="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider opacity-60">{{ stem.substring(0, 3) }}</span>
         </div>
 
         <!-- Volume Slider (Vertical) -->
@@ -64,12 +64,12 @@ const colorClass = computed(() => {
         </div>
 
         <!-- Mute/Solo Buttons -->
-        <div class="flex flex-row gap-2 mb-2">
+        <div class="flex flex-col sm:flex-row gap-1 sm:gap-2 mb-1 sm:mb-2">
             <button @click="$emit('update:solo', !isSolo)"
-                class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all"
+                class="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[9px] sm:text-[10px] font-bold border transition-all"
                 :class="isSolo ? 'bg-yellow-500 border-yellow-500 text-black shadow-[0_0_10px_rgba(234,179,8,0.5)]' : 'border-gray-700 text-gray-500 hover:border-gray-500 bg-black/20'">S</button>
             <button @click="$emit('update:mute', !isMuted)"
-                class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all"
+                class="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[9px] sm:text-[10px] font-bold border transition-all"
                 :class="isMuted ? 'bg-red-500 border-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'border-gray-700 text-gray-500 hover:border-gray-500 bg-black/20'">M</button>
         </div>
 

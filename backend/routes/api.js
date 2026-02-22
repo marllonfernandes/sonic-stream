@@ -3,123 +3,22 @@ const router = express.Router();
 const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const ytDlp = require("yt-dlp-exec");
-const ConfigService = require("../config/configService");
-const GroupsService = require("../config/groupsService");
+const GroupsService = require("../services/groupsService");
+const StorageService = require("../services/storageService");
+const { db } = require("../services/firebase");
 
-// Config endpoints
-router.get("/config/path", (req, res) => {
-  res.json({ path: ConfigService.getDownloadPath() });
-});
+// We no longer read local files, except for tmp processing tasks
+const tmpDir = os.tmpdir();
+const FILES_COLLECTION = "files"; // Firestore collection to store file metadata
 
-router.post("/separate", (req, res) => {
-  const { filename, model = "spleeter:5stems" } = req.body;
-  if (!filename) return res.status(400).json({ error: "Filename is required" });
+const getTmpPath = (filename) => path.join(tmpDir, filename);
 
-  const downloadPath = ConfigService.getDownloadPath();
-  const inputFile = path.join(downloadPath, filename);
-  const outputDir = downloadPath; // Spleeter creates a subdir in output dir
-
-  if (!fs.existsSync(inputFile)) {
-    return res.status(404).json({ error: "File not found" });
-  }
-
-  // Command: spleeter separate -p spleeter:5stems -o <output_dir> <input_file>
-  // We need to set MODEL_PATH to point to our local models
-  const modelPath = path.join(__dirname, "../pretrained_models");
-
-  // Convert model param to just the number of stems if we are using the standard naming convention
-  // But wait, spleeter expects -p spleeter:5stems to look for 5stems folder in the model path.
-  // So we keep -p as is.
-
-  const command = `spleeter separate -p ${model} -o "${outputDir}" "${inputFile}"`;
-
-  console.log(`Running Spleeter with MODEL_PATH=${modelPath}: ${command}`);
-
-  exec(
-    command,
-    {
-      env: {
-        ...process.env,
-        MODEL_PATH: modelPath,
-      },
-    },
-    (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Spleeter error: ${error.message}`);
-        return res
-          .status(500)
-          .json({ error: "Separation failed", details: error.message });
-      }
-      if (stderr) {
-        console.error(`Spleeter stderr: ${stderr}`);
-      }
-
-      // Spleeter creates a folder with the input filename (without extension)
-      const folderName = path.parse(filename).name;
-      res.json({ message: "Separation complete", folder: folderName });
-    },
-  );
-});
-
-router.get("/stems/:folder/:stem", (req, res) => {
-  const downloadPath = ConfigService.getDownloadPath();
-  const { folder, stem } = req.params;
-  const stemPath = path.join(downloadPath, folder, stem);
-
-  if (fs.existsSync(stemPath)) {
-    res.sendFile(stemPath);
-  } else {
-    res.status(404).json({ error: "Stem not found" });
-  }
-});
-
-router.post("/config/path", (req, res) => {
-  const { path: newPath } = req.body;
-  if (!newPath) return res.status(400).json({ error: "Path is required" });
-
+// --- GROUP ENDPOINTS ---
+router.get("/groups", async (req, res) => {
   try {
-    const savedPath = ConfigService.setDownloadPath(newPath);
-    res.json({ path: savedPath });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-router.post("/config/dirs", (req, res) => {
-  let browsePath = req.body.path;
-
-  // Default to current configured path or home dir
-  if (!browsePath) {
-    browsePath = ConfigService.getDownloadPath();
-  }
-
-  try {
-    if (!fs.existsSync(browsePath)) {
-      browsePath = ConfigService.getDownloadPath();
-    }
-
-    const entries = fs.readdirSync(browsePath, { withFileTypes: true });
-    const directories = entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")) // Hide hidden dirs
-      .map((entry) => entry.name);
-
-    res.json({
-      current: path.resolve(browsePath),
-      parent: path.resolve(browsePath, ".."),
-      directories,
-    });
-  } catch (e) {
-    res
-      .status(500)
-      .json({ error: "Failed to list directories", details: e.message });
-  }
-});
-
-// Group Endpoints
-router.get("/groups", (req, res) => {
-  try {
-    const groups = GroupsService.getGroups();
+    const groups = await GroupsService.getGroups();
     res.json(groups);
   } catch (e) {
     res
@@ -128,11 +27,11 @@ router.get("/groups", (req, res) => {
   }
 });
 
-router.post("/groups", (req, res) => {
+router.post("/groups", async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Group name is required" });
-    const newGroup = GroupsService.createGroup(name);
+    const newGroup = await GroupsService.createGroup(name);
     res.json(newGroup);
   } catch (e) {
     res
@@ -141,11 +40,11 @@ router.post("/groups", (req, res) => {
   }
 });
 
-router.put("/groups/:id", (req, res) => {
+router.put("/groups/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    const updatedGroup = GroupsService.updateGroup(id, updates);
+    const updatedGroup = await GroupsService.updateGroup(id, updates);
     res.json(updatedGroup);
   } catch (e) {
     res
@@ -154,10 +53,10 @@ router.put("/groups/:id", (req, res) => {
   }
 });
 
-router.delete("/groups/:id", (req, res) => {
+router.delete("/groups/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    GroupsService.deleteGroup(id);
+    await GroupsService.deleteGroup(id);
     res.json({ message: "Group deleted" });
   } catch (e) {
     res
@@ -166,48 +65,23 @@ router.delete("/groups/:id", (req, res) => {
   }
 });
 
-// Library endpoints
-router.get("/files", (req, res) => {
+// --- FILE LISTING & METADATA ---
+router.get("/files", async (req, res) => {
   try {
-    const downloadPath = ConfigService.getDownloadPath();
-    if (!fs.existsSync(downloadPath)) {
-      return res.json([]); // Return empty if dir doesn't exist
-    }
-    const files = fs
-      .readdirSync(downloadPath)
-      .filter((file) => file.endsWith(".mp3"))
-      .map((file) => {
-        const nameWithoutExt = path.parse(file).name;
-        const stemDir = path.join(downloadPath, nameWithoutExt);
-        let stems = [];
-
-        if (fs.existsSync(stemDir) && fs.statSync(stemDir).isDirectory()) {
-          stems = fs.readdirSync(stemDir).filter((f) => f.endsWith(".wav"));
-        }
-
-        // Check for thumbnail
-        const extensions = [".jpg", ".jpeg", ".png", ".webp"];
-        let imageFile = null;
-        for (const ext of extensions) {
-          const imgName = nameWithoutExt + ext;
-          if (fs.existsSync(path.join(downloadPath, imgName))) {
-            imageFile = imgName;
-            break;
-          }
-        }
-
-        return {
-          name: file,
-          path: path.join(downloadPath, file),
-          url: `/api/stream/${encodeURIComponent(file)}`,
-          imageUrl: imageFile
-            ? `/api/thumbnail/${encodeURIComponent(imageFile)}`
-            : null,
-          hasStems: stems.length > 0,
-          stems: stems,
-          stemFolder: stems.length > 0 ? nameWithoutExt : null,
-        };
-      });
+    // Read from Firestore instead of local fs
+    const snapshot = await db.collection(FILES_COLLECTION).get();
+    const files = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        ...data,
+        name: doc.id,
+        // Replace absolute paths with dynamic API endpoints that generate Signed URLs
+        url: `/api/stream/${encodeURIComponent(doc.id)}`,
+        imageUrl: data.imageUrl
+          ? `/api/thumbnail/${encodeURIComponent(data.imageUrl)}`
+          : null,
+      };
+    });
     res.json(files);
   } catch (e) {
     console.error("Error in /files:", e);
@@ -215,15 +89,17 @@ router.get("/files", (req, res) => {
   }
 });
 
-router.get("/stream/:filename", (req, res) => {
+// --- STREAMING (SIGNED URL PROXY) ---
+router.get("/stream/:filename", async (req, res) => {
   try {
-    const downloadPath = ConfigService.getDownloadPath();
-    const filePath = path.join(downloadPath, req.params.filename);
+    const { filename } = req.params;
+    const gcsPath = `audio/${filename}`;
+    const url = await StorageService.getSignedUrl(gcsPath, 60);
 
-    if (fs.existsSync(filePath)) {
-      res.sendFile(filePath);
+    if (url) {
+      res.redirect(url); // Let the browser seamlessly fetch from GCS signed URL
     } else {
-      res.status(404).json({ error: "File not found" });
+      res.status(404).json({ error: "File not found in storage" });
     }
   } catch (e) {
     console.error("Error in /stream:", e);
@@ -231,13 +107,14 @@ router.get("/stream/:filename", (req, res) => {
   }
 });
 
-router.get("/thumbnail/:filename", (req, res) => {
+router.get("/thumbnail/:filename", async (req, res) => {
   try {
-    const downloadPath = ConfigService.getDownloadPath();
-    const filePath = path.join(downloadPath, req.params.filename);
+    const { filename } = req.params;
+    const gcsPath = `thumbnails/${filename}`;
+    const url = await StorageService.getSignedUrl(gcsPath, 60);
 
-    if (fs.existsSync(filePath)) {
-      res.sendFile(filePath);
+    if (url) {
+      res.redirect(url);
     } else {
       res.status(404).json({ error: "Thumbnail not found" });
     }
@@ -247,7 +124,20 @@ router.get("/thumbnail/:filename", (req, res) => {
   }
 });
 
-// Get video info
+router.get("/stems/:folder/:stem", async (req, res) => {
+  const { folder, stem } = req.params;
+  const gcsPath = `stems/${folder}/${stem}`;
+  // Use a shorter expiration since it's just audio snippets loading
+  const url = await StorageService.getSignedUrl(gcsPath, 60);
+
+  if (url) {
+    res.redirect(url);
+  } else {
+    res.status(404).json({ error: "Stem not found" });
+  }
+});
+
+// --- YOUTUBE DOWNLOAD (PROCESS LOCALLY -> UPLOAD GCS) ---
 router.post("/info", async (req, res) => {
   const { url } = req.body;
   if (!url) {
@@ -255,11 +145,8 @@ router.post("/info", async (req, res) => {
   }
 
   try {
-    // Explicitly set python binary path for yt-dlp
     const pythonBinPath = "/opt/homebrew/bin";
     const newPath = `${pythonBinPath}:${process.env.PATH}`;
-
-    console.log(`Using PATH for yt-dlp: ${newPath}`);
 
     const output = await ytDlp(
       url,
@@ -268,13 +155,11 @@ router.post("/info", async (req, res) => {
         noCheckCertificates: true,
         noWarnings: true,
         preferFreeFormats: true,
-        addHeader: ["referer:youtube.com", "user-agent:googlebot"],
       },
       {
         env: {
           ...process.env,
           PATH: newPath,
-          // Force python executable if possible (some wrappers look for this)
           PYTHON: "/opt/homebrew/bin/python3.11",
         },
       },
@@ -296,126 +181,93 @@ router.post("/info", async (req, res) => {
   }
 });
 
-// Download audio
 router.get("/download", async (req, res) => {
   const { url } = req.query;
-  if (!url) {
-    return res.status(400).json({ error: "URL is required" });
-  }
-
-  const downloadPath = ConfigService.getDownloadPath();
-  const timestamp = Date.now();
+  if (!url) return res.status(400).json({ error: "URL is required" });
 
   try {
-    // We can try to modify PATH to include our python first.
-    // Also try setting YTDLP_PYTHON if supported, or just ensure python3 maps to python3.11
+    const newPath = `/opt/homebrew/bin:${process.env.PATH}`;
 
-    // Explicitly set python binary path for yt-dlp
-    // const pythonPath = "/opt/homebrew/bin"; // Already defined above or use block scope?
-    // It was defined in info route, need to check if it leaks or is just a copy paste error in my previous tool call?
-    // js var scoping is function/block.
+    // Step 1: Get metadata for unique name
+    let filename = `audio_${Date.now()}.mp3`;
+    let baseName = `audio_${Date.now()}`;
+    const info = await ytDlp(url, {
+      dumpSingleJson: true,
+      noWarnings: true,
+    });
 
-    const pythonBinPath = "/opt/homebrew/bin";
-    const newPath = `${pythonBinPath}:${process.env.PATH}`;
-
-    // Get title for filename
-    let filename = "audio.mp3";
-    let baseName = "audio";
-    try {
-      const info = await ytDlp(
-        url,
-        {
-          dumpSingleJson: true,
-          noCheckCertificates: true,
-          noWarnings: true,
-          preferFreeFormats: true,
-          addHeader: ["referer:youtube.com", "user-agent:googlebot"],
-        },
-        {
-          env: {
-            ...process.env,
-            PATH: newPath,
-            PYTHON: "/opt/homebrew/bin/python3.11",
-          },
-        },
-      );
-      if (info.title) {
-        // Sanitize filename
-        baseName = info.title.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
-        filename = baseName + ".mp3";
-      }
-    } catch (e) {
-      console.error("Error fetching title for download:", e);
+    if (info.title) {
+      baseName = info.title.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_");
+      filename = `${baseName}.mp3`;
     }
 
-    const finalPath = path.join(downloadPath, filename);
-    let uniquePath = finalPath;
-    let uniqueFilename = filename;
-    let uniqueBaseName = baseName;
-    let counter = 1;
-
-    // Check for duplicates and append counter
-    while (fs.existsSync(uniquePath)) {
-      const nameObj = path.parse(filename);
-      uniqueBaseName = `${nameObj.name} (${counter})`;
-      uniqueFilename = `${uniqueBaseName}${nameObj.ext}`;
-      uniquePath = path.join(downloadPath, uniqueFilename);
-      counter++;
+    // Since we are serverless, we don't have a reliable way to check "duplicate names" on disk.
+    // We check Firestore instead.
+    const fileDoc = await db.collection(FILES_COLLECTION).doc(filename).get();
+    if (fileDoc.exists) {
+      // Appending timestamp to avoid conflict
+      baseName = `${baseName}_${Date.now()}`;
+      filename = `${baseName}.mp3`;
     }
 
-    // Update baseName to the unique one for thumbnail naming
-    baseName = uniqueBaseName;
-
-    console.log(`Starting download for: ${url} to ${uniquePath}`);
-
-    // We output to the unique base name but let yt-dlp handle extensions
-    // Actually, we specified output: uniquePath which includes .mp3 extension
-    // For thumbnail, we need to tell yt-dlp where to put it.
-    // If we give a template like 'path/basename.%(ext)s', it handles it.
-    // But we are using `output: uniquePath` which is a full path.
-    // Use an output template that matches our unique path but allows extension variability for the thumbnail.
-    // uniquePath is like /.../Song_Title.mp3
-    // We want /.../Song_Title to be the template base.
-    const outputTemplate = path.join(downloadPath, uniqueBaseName + ".%(ext)s");
-
+    // Step 2: Download to /tmp
+    const localTemplate = getTmpPath(`${baseName}.%(ext)s`);
     await ytDlp(
       url,
       {
         extractAudio: true,
         audioFormat: "mp3",
-        output: outputTemplate, // Output template for both audio and thumbnail
-        writeThumbnail: true, // Download thumbnail
-        noCheckCertificates: true,
+        output: localTemplate,
+        writeThumbnail: true,
         noWarnings: true,
-        addHeader: ["referer:youtube.com", "user-agent:googlebot"],
       },
-      {
-        env: {
-          ...process.env,
-          PATH: newPath,
-          PYTHON: "/opt/homebrew/bin/python3.11",
-        },
-      },
+      { env: { ...process.env, PATH: newPath } },
     );
 
-    // yt-dlp might have saved the audio as Song.mp3 (because we asked for mp3 audio format)
-    // We need to find the mp3 file it created. Since we used uniqueBaseName.%(ext)s, it should be uniqueBaseName.mp3
-    // But verify existence.
-    const expectedAudioPath = path.join(downloadPath, `${uniqueBaseName}.mp3`);
+    // Step 3: Check files and Upload to GCS
+    const localAudioPath = getTmpPath(`${baseName}.mp3`);
+    if (fs.existsSync(localAudioPath)) {
+      await StorageService.uploadFile(localAudioPath, `audio/${filename}`);
 
-    if (fs.existsSync(expectedAudioPath)) {
-      res.download(expectedAudioPath, uniqueFilename, (err) => {
-        if (err) {
-          console.error("Error sending file:", err);
+      let imageUrl = null;
+      // Check for thumbnail and upload
+      const extensions = [".jpg", ".jpeg", ".png", ".webp"];
+      for (const ext of extensions) {
+        const localImg = getTmpPath(`${baseName}${ext}`);
+        if (fs.existsSync(localImg)) {
+          const imgName = `${baseName}${ext}`;
+          await StorageService.uploadFile(localImg, `thumbnails/${imgName}`);
+          imageUrl = imgName;
+          fs.unlinkSync(localImg); // cleanup local img
+          break;
         }
-        // Do NOT unlink - user wants to keep the file in library
-      });
+      }
+
+      // Step 4: Save metadata to Firestore
+      await db
+        .collection(FILES_COLLECTION)
+        .doc(filename)
+        .set({
+          hasStems: false,
+          stems: [],
+          stemFolder: null,
+          imageUrl: imageUrl,
+          path: `audio/${filename}`, // Internal reference
+        });
+
+      // Step 5: Cleanup local audio
+      fs.unlinkSync(localAudioPath);
+
+      // Step 6: Trigger browser download via Signed URL or straight json success
+      const downloadUrl = await StorageService.getSignedUrl(
+        `audio/${filename}`,
+        15,
+      );
+      res.redirect(downloadUrl);
     } else {
-      // Fallback check if it saved as something else?
-      res.status(500).json({
-        error: "File not found after download",
-        expected: expectedAudioPath,
-      });
+      res
+        .status(500)
+        .json({ error: "Failed to process audio file locally before upload." });
     }
   } catch (error) {
     console.error("Download error:", error);
@@ -423,60 +275,80 @@ router.get("/download", async (req, res) => {
   }
 });
 
-// Delete file and stems
-router.delete("/files/:filename", (req, res) => {
-  const { filename } = req.params;
-  const downloadPath = ConfigService.getDownloadPath();
-  const filePath = path.join(downloadPath, filename);
-  const nameWithoutExt = path.parse(filename).name;
-  const stemDir = path.join(downloadPath, nameWithoutExt);
+// --- SPLEETER (DOWNLOAD FROM GCS -> LOCAL SPLEET -> UPLOAD GCS) ---
+router.post("/separate", async (req, res) => {
+  const { filename, model = "spleeter:5stems" } = req.body;
+  if (!filename) return res.status(400).json({ error: "Filename required" });
+
+  const baseName = path.parse(filename).name;
+  const localInput = getTmpPath(filename);
+  const localOutputDir = tmpDir; // Spleeter naturally produces /tmp/basename/stems
 
   try {
-    let deleted = false;
+    // 1. Download file from GCS to local tmp
+    await StorageService.downloadFile(`audio/${filename}`, localInput);
 
-    // Delete Main File
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      deleted = true;
-    }
+    // 2. Run Spleeter
+    const modelPath = path.join(__dirname, "../pretrained_models");
+    const command = `spleeter separate -p ${model} -o "${localOutputDir}" "${localInput}"`;
 
-    // Delete Stems Folder (if exists)
-    if (fs.existsSync(stemDir) && fs.statSync(stemDir).isDirectory()) {
-      fs.rmSync(stemDir, { recursive: true, force: true });
-      deleted = true; // Still consider it a successful delete action/intent
-    }
+    exec(
+      command,
+      { env: { ...process.env, MODEL_PATH: modelPath } },
+      async (err, stdout, stderr) => {
+        if (err) {
+          console.error(`Spleeter Error:`, err);
+          return res
+            .status(500)
+            .json({ error: "Spleeter failed", details: err.message });
+        }
 
-    if (deleted) {
-      // Remove file from any groups
-      try {
-        const groups = GroupsService.getGroups();
-        let updated = false;
-        for (const group of groups) {
-          if (group.files.includes(filename)) {
-            group.files = group.files.filter((f) => f !== filename);
-            updated = true;
+        const stemDir = getTmpPath(baseName);
+        if (fs.existsSync(stemDir)) {
+          const stems = fs
+            .readdirSync(stemDir)
+            .filter((f) => f.endsWith(".wav"));
+
+          // 3. Upload stems directly to GCS
+          for (const stem of stems) {
+            await StorageService.uploadFile(
+              path.join(stemDir, stem),
+              `stems/${baseName}/${stem}`,
+            );
           }
-        }
-        if (updated) {
-          GroupsService.saveGroups(groups);
-        }
-      } catch (err) {
-        console.error("Failed to sync groups after file deletion:", err);
-      }
 
-      console.log(`Deleted ${filename} and associated stems.`);
-      res.json({ message: "File deleted successfully" });
-    } else {
-      res.status(404).json({ error: "File not found" });
-    }
+          // 4. Update Firestore doc to reflect stems generated
+          await db.collection(FILES_COLLECTION).doc(filename).update({
+            hasStems: true,
+            stems: stems,
+            stemFolder: baseName,
+          });
+
+          // 5. Cleanup
+          fs.rmSync(stemDir, { recursive: true, force: true });
+          fs.unlinkSync(localInput);
+
+          res.json({
+            message: "Separation complete & uploaded to Cloud Storage",
+            folder: baseName,
+          });
+        } else {
+          res
+            .status(500)
+            .json({ error: "Stem output directory not found locally" });
+        }
+      },
+    );
   } catch (e) {
-    console.error(`Error deleting ${filename}:`, e);
-    res.status(500).json({ error: "Delete failed", details: e.message });
+    res.status(500).json({
+      error: "Failed infrastructure logic for spleeter",
+      details: e.message,
+    });
   }
 });
 
-// Pitch Shift Audio
-router.post("/process/pitch", (req, res) => {
+// --- PITCH SHIFT AUDIO (DOWNLOAD -> FFMPEG -> UPLOAD GCS) ---
+router.post("/process/pitch", async (req, res) => {
   const { filename, semitones } = req.body;
   if (!filename || semitones === undefined) {
     return res
@@ -484,122 +356,164 @@ router.post("/process/pitch", (req, res) => {
       .json({ error: "Filename and semitones are required" });
   }
 
-  const downloadPath = ConfigService.getDownloadPath();
-  const inputFile = path.join(downloadPath, filename);
-
-  if (!fs.existsSync(inputFile)) {
-    return res.status(404).json({ error: "File not found" });
-  }
-
-  // Construct output filename: name_pitch+2.mp3 or name_pitch-2.mp3
   const parsed = path.parse(filename);
   const sign = semitones >= 0 ? "+" : "";
   const outputFilename = `${parsed.name}_pitch${sign}${semitones}${parsed.ext}`;
-  const outputFile = path.join(downloadPath, outputFilename);
+  const localInput = getTmpPath(filename);
+  const localOutput = getTmpPath(outputFilename);
 
-  // rubberband --pitch <semitones> <input> <output>
-  // Calculate pitch scale: 2^(semitones/12)
-  const scale = Math.pow(2, semitones / 12);
+  try {
+    // 1. Download original from GCS
+    await StorageService.downloadFile(`audio/${filename}`, localInput);
 
-  // ffmpeg -i <input> -af "rubberband=pitch=<scale>" -y <output>
-  const command = `ffmpeg -i "${inputFile}" -af "rubberband=pitch=${scale}" -y "${outputFile}"`;
+    // 2. Process with ffmpeg
+    const scale = Math.pow(2, semitones / 12);
+    const command = `ffmpeg -i "${localInput}" -af "rubberband=pitch=${scale}" -y "${localOutput}"`;
 
-  console.log(`Running ffmpeg (rubberband): ${command}`);
+    exec(command, async (err) => {
+      if (err) {
+        console.error("FFMPEG error:", err);
+        return res.status(500).json({ error: "Pitch shift failed" });
+      }
 
-  exec(command, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`ffmpeg error: ${error.message}`);
-      return res
-        .status(500)
-        .json({ error: "Pitch shift failed", details: error.message });
-    }
-    // ffmpeg outputs to stderr usually, so we just log it but don't treat as error unless error obj exists
-    if (stderr) {
-      console.log(`ffmpeg stderr: ${stderr}`);
-    }
+      // 3. Upload to GCS
+      await StorageService.uploadFile(localOutput, `audio/${outputFilename}`);
 
-    console.log(`Pitch shift complete: ${outputFilename}`);
-    res.json({ message: "Pitch shift complete", filename: outputFilename });
-  });
+      // 4. Save to Firestore (reusing same thumbnail if available)
+      const originalDoc = await db
+        .collection(FILES_COLLECTION)
+        .doc(filename)
+        .get();
+      let imageUrl = null;
+      if (originalDoc.exists) imageUrl = originalDoc.data().imageUrl;
+
+      await db
+        .collection(FILES_COLLECTION)
+        .doc(outputFilename)
+        .set({
+          hasStems: false,
+          stems: [],
+          stemFolder: null,
+          imageUrl: imageUrl,
+          path: `audio/${outputFilename}`,
+        });
+
+      // 5. Cleanup
+      fs.unlinkSync(localInput);
+      fs.unlinkSync(localOutput);
+
+      res.json({ message: "Pitch shift complete", filename: outputFilename });
+    });
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: "Failed to process pitch", details: e.message });
+  }
 });
 
-// Process chords
-router.post("/process/chords", (req, res) => {
+// --- PROCESS CHORDS (DOWNLOAD -> PYTHON -> UPLOAD GCS) ---
+router.post("/process/chords", async (req, res) => {
   const { filename } = req.body;
-  if (!filename) {
-    return res.status(400).json({ error: "Filename is required" });
-  }
-
-  const downloadPath = ConfigService.getDownloadPath();
-  const inputFile = path.join(downloadPath, filename);
-
-  if (!fs.existsSync(inputFile)) {
-    return res.status(404).json({ error: "File not found" });
-  }
+  if (!filename) return res.status(400).json({ error: "Filename is required" });
 
   const parsed = path.parse(filename);
-  const outputFile = path.join(downloadPath, `${parsed.name}_chords.json`);
+  const jsonFilename = `${parsed.name}_chords.json`;
+  const localInput = getTmpPath(filename);
+  const localOutput = getTmpPath(jsonFilename);
 
-  // Script path
-  const scriptPath = path.join(__dirname, "../chord_extractor.py");
-  const pythonBin = "/opt/homebrew/bin/python3.11";
+  try {
+    await StorageService.downloadFile(`audio/${filename}`, localInput);
 
-  const command = `"${pythonBin}" "${scriptPath}" "${inputFile}"`;
+    const scriptPath = path.join(__dirname, "../chord_extractor.py");
+    const pythonBin = "/opt/homebrew/bin/python3.11";
+    const command = `"${pythonBin}" "${scriptPath}" "${localInput}"`;
 
-  console.log(`Running python chord extraction: ${command}`);
+    exec(
+      command,
+      { maxBuffer: 1024 * 1024 * 10 },
+      async (err, stdout, stderr) => {
+        if (err) {
+          console.error("Chord extraction error", err);
+          return res.status(500).json({ error: "Extraction failed" });
+        }
 
-  exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Chord extraction error: ${error.message}`);
-      return res
-        .status(500)
-        .json({ error: "Extraction failed", details: error.message });
+        try {
+          const chordsData = JSON.parse(stdout);
+          // Write locally to upload
+          fs.writeFileSync(localOutput, JSON.stringify(chordsData));
+
+          await StorageService.uploadFile(
+            localOutput,
+            `chords/${jsonFilename}`,
+          );
+
+          fs.unlinkSync(localInput);
+          fs.unlinkSync(localOutput);
+
+          res.json({ message: "Extraction complete", data: chordsData });
+        } catch (parseErr) {
+          res.status(500).json({ error: "Failed to parse python output" });
+        }
+      },
+    );
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: "Failed to process chords", details: e.message });
+  }
+});
+
+router.get("/chords/:filename", async (req, res) => {
+  try {
+    const parsed = path.parse(req.params.filename);
+    const gcsPath = `chords/${parsed.name}_chords.json`;
+
+    // Download directly from GCS to memory and send as JSON response
+    // This avoids CORS issues when the frontend tries to fetch a Signed URL for JSON data
+    const { bucket } = require("../services/firebase");
+    const [fileContent] = await bucket.file(gcsPath).download();
+
+    res.json(JSON.parse(fileContent.toString("utf8")));
+  } catch (e) {
+    res.json(null); // Return null if chords don't exist yet, matching previous behavior
+  }
+});
+
+// --- DELETES (GCS + FIRESTORE) ---
+router.delete("/files/:filename", async (req, res) => {
+  const { filename } = req.params;
+  const baseName = path.parse(filename).name;
+
+  try {
+    // Delete Main Audio & Thumbnail from GCS (Assume thumbnail png mostly)
+    await StorageService.deleteFile(`audio/${filename}`);
+
+    // We should look up the doc first to get thumbnail name
+    const fileDoc = await db.collection(FILES_COLLECTION).doc(filename).get();
+    if (fileDoc.exists) {
+      const data = fileDoc.data();
+      if (data.imageUrl)
+        await StorageService.deleteFile(`thumbnails/${data.imageUrl}`);
     }
 
-    if (stderr && stderr.includes("error")) {
-      console.error(`Chord extraction stderr: ${stderr}`);
-      try {
-        const errParsed = JSON.parse(stderr);
-        return res
-          .status(500)
-          .json({ error: "Extraction failed", details: errParsed.error });
-      } catch (e) {
-        // ignore parsing error
+    // Delete Stems from GCS
+    await StorageService.deleteFolder(`stems/${baseName}/`);
+
+    // Delete from Firestore
+    await db.collection(FILES_COLLECTION).doc(filename).delete();
+
+    // Cleanup from groups
+    const groups = await GroupsService.getGroups();
+    for (const group of groups) {
+      if (group.files.includes(filename)) {
+        const updatedFiles = group.files.filter((f) => f !== filename);
+        await GroupsService.updateGroup(group.id, { files: updatedFiles });
       }
     }
 
-    try {
-      // stdout contains JSON from the python script
-      const chordsData = JSON.parse(stdout);
-
-      // Save it to file
-      fs.writeFileSync(outputFile, JSON.stringify(chordsData, null, 2));
-
-      console.log(`Chord extraction complete: ${outputFile}`);
-      res.json({
-        message: "Extraction complete",
-        file: outputFile,
-        data: chordsData,
-      });
-    } catch (e) {
-      console.error(`Failed to parse chord extraction output:`, e);
-      res
-        .status(500)
-        .json({ error: "Failed to parse output", details: e.message });
-    }
-  });
-});
-
-router.get("/chords/:filename", (req, res) => {
-  const downloadPath = ConfigService.getDownloadPath();
-  const parsed = path.parse(req.params.filename);
-  const filePath = path.join(downloadPath, `${parsed.name}_chords.json`);
-
-  if (fs.existsSync(filePath)) {
-    res.sendFile(filePath);
-  } else {
-    // Return 200 OK with null to prevent scary 404 browser console errors
-    res.json(null);
+    res.json({ message: "File, stems and metadata deleted globally." });
+  } catch (e) {
+    res.status(500).json({ error: "Delete failed", details: e.message });
   }
 });
 

@@ -51,20 +51,20 @@ const applyPitch = async () => {
 </script>
 
 <template>
-    <div class="w-full flex flex-col gap-4 p-4">
+    <div class="w-full flex flex-col gap-2 sm:gap-4 p-2 sm:p-4 mt-2 sm:mt-0">
         <!-- Top Bar -->
-        <div class="flex items-center justify-between text-gray-400">
-            <Button icon="pi pi-chevron-down" text rounded severity="secondary" @click="$emit('back')" />
-            <div class="flex flex-col items-center">
-                <h2 class="text-white font-medium text-sm md:text-base">{{ title }}</h2>
+        <div class="flex items-center justify-between text-gray-400 gap-1 w-full">
+            <Button icon="pi pi-chevron-down" text rounded severity="secondary" @click="$emit('back')" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10 shrink-0" />
+            <div class="flex flex-col items-center flex-1 max-w-[50%] md:max-w-[60%] mx-auto overflow-hidden">
+                <h2 class="text-white font-medium text-sm md:text-base truncate w-full text-center">{{ title }}</h2>
                 <!-- <span class="text-xs">{{ artist }}</span> -->
             </div>
-            <div class="flex gap-2">
+            <div class="flex gap-1">
                 <Button icon="pi pi-sort-alt" text rounded severity="secondary" @click="pitchVisible = true"
-                    v-tooltip="'Pitch Shift'" />
-                <Button icon="pi pi-refresh" text rounded severity="secondary" @click="$emit('refresh')" />
-                <Button icon="pi pi-download" text rounded severity="secondary" />
-                <Button icon="pi pi-bars" text rounded severity="secondary" />
+                    v-tooltip="'Pitch Shift'" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
+                <Button icon="pi pi-refresh" text rounded severity="secondary" @click="$emit('refresh')" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
+                <Button icon="pi pi-download" text rounded severity="secondary" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
+                <Button icon="pi pi-bars" text rounded severity="secondary" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
             </div>
         </div>
 

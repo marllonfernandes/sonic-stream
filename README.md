@@ -1,14 +1,25 @@
-# Audio Player Studio
+# Audio Player Studio (Serverless Edition)
 
 Este é um projeto de um player de áudio interativo focado no estudo e isolamento de faixas musicais. Ele permite separar vocais, bateria, baixo e outros instrumentos de qualquer música e tocá-los em um estúdio web de forma sincronizada, alterando o volume de cada um, mutando faixas e monitorando os principais acordes da música em tempo real.
+
+O projeto foi modernizado para uma **Arquitetura Serverless no Google Cloud Platform (GCP)** visando escalabilidade e redução drástica de custos (paga apenas quando o backend estiver processando requisições).
 
 ## 🚀 Funcionalidades Atuais
 
 - **Download de Músicas do YouTube:** Cole o link de um clipe ou música do YouTube, e o backend baixará o áudio (MP3).
 - **Separação de Faixas (Stems):** Utilizando o modelo de Inteligência Artificial **Spleeter**, a música pode ser separada em até 5 faixas (Vocal, Bateria, Baixo, Piano, Outros).
-- **Mixer Web Profissional:** Uma interface em **Vue.js + Tailwind CSS + PrimeVue** que permite controlar o volume independentemente, fazer solo de instrumentos e mutá-los em tempo real sem "engasgos".
-- **Identificação de Acordes por IA (Librosa):** Através de um script avançado em **Python** utilizando a biblioteca de processamento de áudio `librosa`, os acordes são mapeados na própria interface, seguindo de perto a posição e o timing do áudio que está tocando.
-- **Mudança de Tom (Pitch Shift) - _Em Breve/Configuração Externa_:** Recurso de alteração de tom da música (Pitch Shifter).
+- **Mixer Web Profissional:** Uma interface em **Vue.js + Tailwind CSS + PrimeVue** que permite controlar o volume independentemente, fazer solo de instrumentos e mutá-los em tempo real.
+- **Identificação de Acordes por IA (Librosa):** Através de um script avançado em **Python** utilizando a biblioteca de processamento de áudio `librosa`, os acordes são mapeados na própria interface, sincronizados com o áudio.
+- **Mudança de Tom (Pitch Shift):** Recurso de alteração de tom da música (Pitch Shifter) integrado no mixer utilizando o `rubberband-cli` via `ffmpeg`.
+
+---
+
+## ☁️ Arquitetura Serverless (GCP)
+
+- **Backend (Google Cloud Run):** Onde o código Node.js executa. Ele escala para zero quando não há acesso. Ele baixa os vídeos temporariamente no `/tmp` da nuvem, processa e exclui, enviando a versão final para o Storage.
+- **Storage (Google Cloud Storage - GCS):** Armazenamento de todos os arquivos MP3, WAV (Stems), imagens (thumbnails) e metadados JSON. O acesso pelo Frontend se dá via streaming por `Signed URLs` (URLs temporárias seguras de altíssima performance).
+- **Banco de Dados (Firestore Native):** Banco NoSQL Serverless para registrar os IDs dos Grupos e as metadados completos de cada arquivo de áudio presente na biblioteca.
+- **CI / CD (Cloud Build):** Orquestração automatizada para construir o Vite, empacotar a imagem Docker (juntando Node, Python e FFmpeg) e fazer o envio automático para o Artifact Registry.
 
 ---
 
@@ -17,9 +28,11 @@ Este é um projeto de um player de áudio interativo focado no estudo e isolamen
 **Backend:**
 
 - **Node.js** (Express)
+- **Firebase Admin SDK** (Conexão direta com Firestore e Storage)
+- **@google-cloud/storage** & **@google-cloud/firestore**
 - **yt-dlp-exec** (Para extração dos áudios do YouTube)
-- **fluent-ffmpeg** (Manipulação de formatos de áudio/Pitch Shift)
-- **Python / Librosa / Numpy** (Para detecção de acordes através das classes de pitch/chromagram)
+- **fluent-ffmpeg** / **rubberband-cli** (Manipulação de formatos de áudio/Pitch Shift)
+- **Python / Librosa / Numpy** (Para detecção de acordes)
 - **Spleeter by Deezer** (Para isolar e separar os instrumentos)
 
 **Frontend:**
@@ -31,73 +44,29 @@ Este é um projeto de um player de áudio interativo focado no estudo e isolamen
 
 ---
 
-## ⚙️ Pré-requisitos do Sistema
-
-Como este projeto utiliza aprendizado de máquina e processamento avançado de áudio por baixo dos panos, seu sistema precisa ter algumas bibliotecas instaladas de forma global para funcionar.
-
-### 1. Node.js e NPM
-
-Certifique-se de que o **Node.js** (v18+) esteja instalado na sua máquina (`node -v`).
-
-### 2. FFmpeg e Yt-dlp
-
-O backend usa o FFmpeg para converter e analisar os áudios e `yt-dlp` globalmente:
-
-```sh
-brew install ffmpeg
-brew install yt-dlp
-```
-
-### 3. Python 3 (Librosa e Ferramentas Matemáticas)
-
-O sistema de leitura de acordes utiliza a versão local do Python com os pacotes matemáticos necessários:
-
-```sh
-pip install librosa numpy scipy
-```
-
-### 4. Spleeter
-
-O projeto roda a linha de comando do [Spleeter](https://github.com/deezer/spleeter).
-Para o macOS, a melhor forma de instalação é utilizando o PIP (ou um ambiente virtual Python):
-
-```sh
-pip install spleeter
-```
-
-_Os modelos de treinamento (ex: `5stems`) devem estar presentes ou ser baixados pela primeira vez pelo backend em `/backend/pretrained_models` para que o isolamento de faixas da música funcione sem conexão com a internet ou atrasos maiores._
-
----
-
 ## 🏃 Como Rodar a Aplicação
 
-A aplicação possui um arquivo `Makefile` na pasta raiz para facilitar a inicialização.
+### Pré-requisitos (Desenvolvimento Local)
 
-### Instalação (Primeira Vez)
+Para testar a aplicação no seu computador (com o backend Node conectando nos recursos remotos da GCP), você precisa:
 
-Para garantir que as sub-pastas instalaram as dependências corretas (packages.json), utilize:
-
-```bash
-make install
-```
-
-Isso fará o `npm install` automaticamente nas pastas `/backend` e `/frontend`.
-
-### Rodando o Servidor Simultaneamente
-
-O sistema executa todos os componentes integrados com apenas um comando (compilando a versão do Vue através do Vite e em seguida subindo o `server.js` na porta **3000** conectando-se aos arquivos estáticos do frontend).
+1. Das credenciais de API do projeto do Google: `sa-key.json` salva na pasta `/backend`.
+2. FFmpeg, yt-dlp, Python 3.11, Spleeter (`pip install spleeter`) e Librosa instalados na sua máquina localmente para processamento das mídias.
 
 ```bash
+# Iniciar o ambiente (Instalar pacotes, buildar o frontend, exportar a API KEY do GCP e rodar na :3000)
+export GOOGLE_APPLICATION_CREDENTIALS="sa-key.json"
 make all
 ```
 
-**(Ou caso queira iniciar sem dar "build" novamente do frontend)**:
+### 🚀 Deploy para Produção (GCP)
+
+O processo de deploy na nuvem foi simplificado utilizando o Google Cloud Build (`cloudbuild.yaml`). Cuidará da compilação, estruturação Docker, do push para o Artifact Registry e da criação da nova Revisão no Cloud Run.
+
+Basta logar na sua conta do GCloud e executar o Makefile:
 
 ```bash
-make start
+make deploy
 ```
 
-Após ver `Server running on port 3000`, você pode acessar no seu navegador:
-👉 **[http://localhost:3000](http://localhost:3000)**
-
-_(Nota: como todo o roteamento do API e estáticos rodam sob a mesma porta para resolver problemas de CORS, o front-end está incluído na mesma porta NodeJS. Se for desenvolver focado no front-end, você pode ir para `cd frontend` e rodar `npm run dev` para usar a porta default Vite com Hot Reload)._
+O console te devolverá com a nova URL pública da sua aplicação (Ex: `https://sonic-stream-app-xxxxx.us-central1.run.app`).

@@ -152,6 +152,15 @@ const dropToUngrouped = async (e) => {
         }
     }
 };
+
+const removeFromGroup = async (file) => {
+    for (const g of groups.value) {
+        if (g.files?.includes(file.name)) {
+            g.files = g.files.filter(f => f !== file.name);
+            await updateGroupFiles(g);
+        }
+    }
+};
 // --- End Groups Logic ---
 
 // Generate a gradient based on the filename for a placeholder thumb
@@ -224,20 +233,9 @@ const deleteFile = (file) => {
 
 <template>
     <div class="w-full flex flex-col gap-2 pb-32">
-        <ConfirmDialog :pt="{
-            root: { class: 'bg-moises-surface border border-moises-border text-white' },
-            header: { class: 'text-white' },
-            content: { class: 'text-moises-secondary' },
-            icon: { class: 'text-red-500' }
-        }" />
+        <ConfirmDialog />
 
-        <Dialog v-model:visible="showCreateGroupDialog" modal header="Create New Group" :style="{ width: '25rem' }"
-            :pt="{
-                root: { class: 'bg-moises-surface border border-moises-border text-white' },
-                header: { class: 'text-white border-b border-moises-border/50 pb-3' },
-                content: { class: 'pt-4 text-moises-secondary' },
-                footer: { class: 'pt-2 border-t border-moises-border/50' }
-            }">
+        <Dialog v-model:visible="showCreateGroupDialog" modal header="Create New Group" :style="{ width: '25rem' }">
             <div class="flex flex-col gap-2">
                 <label for="groupName" class="text-sm font-semibold text-moises-secondary">Group Name</label>
                 <InputText id="groupName" v-model="newGroupName" autocomplete="off" class="bg-black/20 border border-moises-border text-white p-2 rounded-lg focus:border-moises-accent focus:ring-1 focus:ring-moises-accent transition-all" @keyup.enter="confirmCreateGroup" autofocus />
@@ -307,13 +305,18 @@ const deleteFile = (file) => {
                         </div>
 
                         <!-- Actions -->
-                        <div class="flex items-center gap-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div class="flex items-center gap-1 sm:gap-2 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <div v-if="separating[file.name]">
                                 <ProgressSpinner style="width: 24px; height: 24px" strokeWidth="6" />
                             </div>
                             <Button v-else-if="!file.hasStems" label="Split" icon="pi pi-bolt" size="small"
                                 class="!bg-moises-accent !border-moises-accent hover:!bg-blue-600 text-xs py-1 px-3 h-8 shadow-lg shadow-blue-500/20"
                                 @click.stop="separateAudio(file)" />
+
+                            <Button icon="pi pi-minus-circle" text rounded severity="warning"
+                                title="Remove from Group"
+                                class="text-moises-secondary hover:!text-orange-400 hover:!bg-orange-400/10"
+                                @click.stop="removeFromGroup(file)" />
 
                             <Button icon="pi pi-trash" text rounded severity="danger"
                                 class="text-moises-secondary hover:!text-red-500 hover:!bg-red-500/10"
@@ -362,7 +365,7 @@ const deleteFile = (file) => {
                         </div>
 
                         <!-- Actions -->
-                        <div class="flex items-center gap-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div class="flex items-center gap-2 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <div v-if="separating[file.name]">
                                 <ProgressSpinner style="width: 24px; height: 24px" strokeWidth="6" />
                             </div>

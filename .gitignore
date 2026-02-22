@@ -147,3 +147,6 @@ downloads
 
 # Pretrained models
 pretrained_models
+
+# Firebase credentials
+sa-key.json

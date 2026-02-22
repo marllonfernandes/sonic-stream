@@ -20,7 +20,7 @@ const formatTime = (seconds) => {
 </script>
 
 <template>
-    <div class="w-full flex flex-col gap-4 p-6 pt-2">
+    <div class="w-full flex flex-col gap-2 sm:gap-4 p-3 sm:p-6 pt-1 sm:pt-2">
 
         <!-- Scrubber -->
         <div class="flex items-center gap-4 text-xs font-mono text-moises-secondary">
@@ -35,30 +35,30 @@ const formatTime = (seconds) => {
         </div>
 
         <!-- Transport Controls -->
-        <div class="flex items-center justify-between px-4 mt-2">
+        <div class="flex items-center justify-between px-1 sm:px-4 mt-1 sm:mt-2">
             <!-- Left Options -->
-            <div class="flex gap-4">
+            <div class="flex gap-1 sm:gap-4 hidden sm:flex">
                 <Button icon="pi pi-replay" text rounded class="text-moises-secondary hover:text-white" />
                 <Button icon="pi pi-metronome" text rounded class="text-moises-secondary hover:text-white" />
             </div>
 
             <!-- Main Controls -->
-            <div class="flex items-center gap-8">
+            <div class="flex items-center gap-4 sm:gap-8 mx-auto sm:mx-0">
                 <Button icon="pi pi-step-backward" text rounded size="large"
-                    class="text-moises-text hover:text-moises-accent transition-colors" @click="$emit('prev')" />
+                    class="text-moises-text hover:text-moises-accent transition-colors !p-2 sm:!p-3" @click="$emit('prev')" />
 
                 <button
-                    class="w-16 h-16 rounded-full bg-moises-accent text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(59,130,246,0.4)]"
+                    class="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-moises-accent text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(59,130,246,0.4)]"
                     @click="$emit('togglePlay')">
-                    <i :class="isPlaying ? 'pi pi-pause' : 'pi pi-play'" style="font-size: 1.5rem"></i>
+                    <i :class="isPlaying ? 'pi pi-pause' : 'pi pi-play'" class="text-xl sm:text-2xl"></i>
                 </button>
 
                 <Button icon="pi pi-step-forward" text rounded size="large"
-                    class="text-moises-text hover:text-moises-accent transition-colors" @click="$emit('next')" />
+                    class="text-moises-text hover:text-moises-accent transition-colors !p-2 sm:!p-3" @click="$emit('next')" />
             </div>
 
             <!-- Right Options -->
-            <div class="flex gap-4">
+            <div class="flex gap-1 sm:gap-4 hidden sm:flex">
                 <Button icon="pi pi-sliders-h" text rounded class="text-moises-secondary hover:text-white" />
             </div>
         </div>

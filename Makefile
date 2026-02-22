@@ -1,7 +1,6 @@
-
 # Makefile
 
-.PHONY: install build-frontend start all
+.PHONY: install build-frontend start all deploy
 
 install:
 	cd backend && npm install
@@ -14,3 +13,6 @@ start:
 	cd backend && npm start
 
 all: install build-frontend start
+
+deploy: build-frontend
+	gcloud builds submit --config cloudbuild.yaml .
