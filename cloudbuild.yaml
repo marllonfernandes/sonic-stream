@@ -1,0 +1,57 @@
+steps:
+  # 1. Install frontend dependencies and build
+  - name: "node:20"
+    dir: "frontend"
+    entrypoint: npm
+    args: ["install"]
+  - name: "node:20"
+    dir: "frontend"
+    entrypoint: npm
+    args: ["run", "build"]
+
+  # 2. Build the backend Docker image (which now includes the static frontend built in step 1)
+  - name: "gcr.io/cloud-builders/docker"
+    dir: "backend"
+    args:
+      [
+        "build",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/sonic-stream:latest",
+        ".",
+      ]
+
+  # 3. Push the image to Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "push",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/sonic-stream:latest",
+      ]
+
+  # 4. Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      [
+        "run",
+        "deploy",
+        "sonic-stream-app",
+        "--image",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/sonic-stream:latest",
+        "--region",
+        "us-central1",
+        "--allow-unauthenticated",
+        "--memory",
+        "4Gi",
+        "--cpu",
+        "2",
+        "--execution-environment",
+        "gen2",
+        "--timeout",
+        "6m",
+        "--min-instances",
+        "0",
+      ]
+
+images:
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/sonic-stream:latest"
