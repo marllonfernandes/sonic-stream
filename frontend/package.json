@@ -14,7 +14,8 @@
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",
     "sortablejs": "^1.15.7",
-    "vue": "^3.5.25"
+    "vue": "^3.5.25",
+    "vue3-google-login": "^2.0.37"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.2",

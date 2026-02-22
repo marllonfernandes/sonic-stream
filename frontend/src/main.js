@@ -6,6 +6,7 @@ import Aura from "@primevue/themes/aura";
 import "primeicons/primeicons.css";
 
 import ConfirmationService from "primevue/confirmationservice";
+import vue3GoogleLogin from "vue3-google-login";
 
 import { polyfill } from "mobile-drag-drop";
 import "mobile-drag-drop/default.css";
@@ -28,4 +29,10 @@ app.use(PrimeVue, {
   },
 });
 app.use(ConfirmationService);
+
+app.use(vue3GoogleLogin, {
+  clientId:
+    "1094295943535-k6dmt5i8mmc114ccod72sp150gpuf33j.apps.googleusercontent.com",
+});
+
 app.mount("#app");
