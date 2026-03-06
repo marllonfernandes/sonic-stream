@@ -178,6 +178,24 @@ const getGradient = (name) => {
     return `linear-gradient(135deg, ${c1}, ${c2})`;
 }
 
+const separateGroup = async (group) => {
+    const filesToSplit = group.fileObjects.filter(f => !f.hasStems);
+    if (filesToSplit.length === 0) return;
+
+    confirm.require({
+        message: `Do you want to split all ${filesToSplit.length} songs in this group? This will be done sequentially.`,
+        header: 'Split Group',
+        icon: 'pi pi-bolt',
+        acceptProps: { label: 'Split All', severity: 'info' },
+        rejectProps: { label: 'Cancel', severity: 'secondary', outlined: true },
+        accept: async () => {
+            for (const file of filesToSplit) {
+                await separateAudio(file);
+            }
+        }
+    });
+};
+
 const separateAudio = async (file) => {
     separating.value[file.name] = true;
     try {
@@ -197,6 +215,32 @@ const separateAudio = async (file) => {
     } finally {
         separating.value[file.name] = false;
     }
+};
+
+const deleteStems = (file) => {
+    confirm.require({
+        message: `Are you sure you want to delete the separated stems for "${file.name}"? The main audio will be kept.`,
+        header: 'Delete Stems',
+        icon: 'pi pi-exclamation-triangle',
+        acceptProps: { label: 'Remove Stems', severity: 'warning' },
+        rejectProps: { label: 'Cancel', severity: 'secondary', outlined: true },
+        accept: async () => {
+            try {
+                const res = await fetch(`/api/files/${encodeURIComponent(file.name)}/stems`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    emit('separate'); // Refresh library
+                } else {
+                    const data = await res.json();
+                    throw new Error(data.error || 'Delete stems failed');
+                }
+            } catch (e) {
+                console.error("Failed to delete stems", e);
+                alert("Failed to delete stems: " + e.message);
+            }
+        }
+    });
 };
 
 const deleteFile = (file) => {
@@ -269,6 +313,10 @@ const deleteFile = (file) => {
                     <span class="text-xs text-moises-secondary ml-2 px-2 py-0.5 bg-moises-surface rounded-full">{{ group.fileObjects.length }}</span>
                 </h4>
                 <div class="flex items-center gap-2">
+                    <Button v-if="group.fileObjects.some(f => !f.hasStems)" 
+                        icon="pi pi-bolt" text rounded severity="info" 
+                        class="w-8 h-8 p-0 text-moises-accent hover:!bg-moises-accent/20" 
+                        @click="separateGroup(group)" title="Split all songs in group" />
                     <Button v-if="hidePlayerControls && group.fileObjects.length > 0" icon="pi pi-plus" text rounded severity="success" class="w-8 h-8 p-0 text-moises-accent hover:!bg-moises-accent/20" @click="$emit('add-group', group.fileObjects)" title="Add all songs to setlist" />
                     <Button v-if="!hidePlayerControls" icon="pi pi-trash" text rounded severity="danger" class="w-8 h-8 p-0 text-moises-secondary hover:!text-red-500" @click="deleteGroup(group)" />
                 </div>
@@ -319,6 +367,10 @@ const deleteFile = (file) => {
                             <Button v-else-if="!file.hasStems" label="Split" icon="pi pi-bolt" size="small"
                                 class="!bg-moises-accent !border-moises-accent hover:!bg-blue-600 text-xs py-1 px-3 h-8 shadow-lg shadow-blue-500/20"
                                 @click.stop="separateAudio(file)" />
+                            <Button v-else icon="pi pi-eject" text rounded severity="warning"
+                                title="Remove Stems"
+                                class="text-moises-secondary hover:!text-orange-400 hover:!bg-orange-400/10"
+                                @click.stop="deleteStems(file)" />
 
                             <Button icon="pi pi-minus-circle" text rounded severity="warning"
                                 title="Remove from Group"
@@ -379,6 +431,10 @@ const deleteFile = (file) => {
                             <Button v-else-if="!file.hasStems" label="Split" icon="pi pi-bolt" size="small"
                                 class="!bg-moises-accent !border-moises-accent hover:!bg-blue-600 text-xs py-1 px-3 h-8 shadow-lg shadow-blue-500/20"
                                 @click.stop="separateAudio(file)" />
+                            <Button v-else icon="pi pi-eject" text rounded severity="warning"
+                                title="Remove Stems"
+                                class="text-moises-secondary hover:!text-orange-400 hover:!bg-orange-400/10"
+                                @click.stop="deleteStems(file)" />
 
                             <Button icon="pi pi-trash" text rounded severity="danger"
                                 class="text-moises-secondary hover:!text-red-500 hover:!bg-red-500/10"

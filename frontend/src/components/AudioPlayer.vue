@@ -85,14 +85,14 @@ const tracks = computed(() => {
 
     if (hasStems.value && props.file.stems) {
         // Sort stems to consistent order if needed
-        // Expected: vocals, drums, bass, piano, other
-        const order = ['vocals.wav', 'drums.wav', 'bass.wav', 'piano.wav', 'other.wav'];
+        // Expected: vocals.mp3, drums.mp3, bass.mp3, piano.mp3, other.mp3
+        const order = ['vocals.mp3', 'drums.mp3', 'bass.mp3', 'piano.mp3', 'other.mp3'];
         const files = [...props.file.stems].sort((a, b) => {
             return order.indexOf(a) - order.indexOf(b);
         });
 
         return files.map(f => {
-            const name = f.replace('.wav', '');
+            const name = f.replace('.mp3', '');
             return {
                 id: name,
                 name: name,
@@ -149,7 +149,7 @@ const loadAudio = async (file) => {
         const tracksToLoad = [];
         if (file.hasStems && file.stems) {
             file.stems.forEach(s => {
-                const name = s.replace('.wav', '');
+                const name = s.replace('.mp3', '');
                 tracksToLoad.push({ id: name, url: `/api/stems/${encodeURIComponent(file.stemFolder)}/${s}` });
             });
         } else {
