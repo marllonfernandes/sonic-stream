@@ -20,10 +20,14 @@ const props = defineProps({
     isPlaying: {
         type: Boolean,
         default: false
+    },
+    hidePlayerControls: {
+        type: Boolean,
+        default: false
     }
 });
 
-const emit = defineEmits(['play', 'separate']);
+const emit = defineEmits(['play', 'separate', 'add-group']);
 const confirm = useConfirm();
 
 const separating = ref({}); // Track separation status by filename
@@ -264,7 +268,10 @@ const deleteFile = (file) => {
                     {{ group.name }}
                     <span class="text-xs text-moises-secondary ml-2 px-2 py-0.5 bg-moises-surface rounded-full">{{ group.fileObjects.length }}</span>
                 </h4>
-                <Button icon="pi pi-trash" text rounded severity="danger" class="w-8 h-8 p-0 text-moises-secondary hover:!text-red-500" @click="deleteGroup(group)" />
+                <div class="flex items-center gap-2">
+                    <Button v-if="hidePlayerControls && group.fileObjects.length > 0" icon="pi pi-plus" text rounded severity="success" class="w-8 h-8 p-0 text-moises-accent hover:!bg-moises-accent/20" @click="$emit('add-group', group.fileObjects)" title="Add all songs to setlist" />
+                    <Button v-if="!hidePlayerControls" icon="pi pi-trash" text rounded severity="danger" class="w-8 h-8 p-0 text-moises-secondary hover:!text-red-500" @click="deleteGroup(group)" />
+                </div>
             </div>
 
             <div class="flex flex-col gap-2 min-h-[40px] rounded-lg p-1" :class="{'bg-black/10 border border-dashed border-white/5': group.fileObjects.length === 0}">
@@ -305,7 +312,7 @@ const deleteFile = (file) => {
                         </div>
 
                         <!-- Actions -->
-                        <div class="flex items-center gap-1 sm:gap-2 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div v-if="!hidePlayerControls" class="flex items-center gap-1 sm:gap-2 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <div v-if="separating[file.name]">
                                 <ProgressSpinner style="width: 24px; height: 24px" strokeWidth="6" />
                             </div>
@@ -365,7 +372,7 @@ const deleteFile = (file) => {
                         </div>
 
                         <!-- Actions -->
-                        <div class="flex items-center gap-2 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div v-if="!hidePlayerControls" class="flex items-center gap-2 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <div v-if="separating[file.name]">
                                 <ProgressSpinner style="width: 24px; height: 24px" strokeWidth="6" />
                             </div>
