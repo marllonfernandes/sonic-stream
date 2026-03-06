@@ -275,16 +275,25 @@ router.get("/download", async (req, res) => {
   }
 });
 
-// --- SPLEETER (DOWNLOAD FROM GCS -> LOCAL SPLEET -> UPLOAD GCS) ---
-router.post("/separate", async (req, res) => {
-  const { filename, model = "spleeter:5stems" } = req.body;
-  if (!filename) return res.status(400).json({ error: "Filename required" });
+// --- SPLEETER QUEUE ---
+const spleeterQueue = [];
+let isProcessingSpleeter = false;
 
-  const baseName = path.parse(filename).name;
-  const localInput = getTmpPath(filename);
-  const localOutputDir = tmpDir; // Spleeter naturally produces /tmp/basename/stems
+const processSpleeterQueue = async () => {
+  if (isProcessingSpleeter || spleeterQueue.length === 0) return;
+
+  isProcessingSpleeter = true;
+  const { filename, model, resolve, reject } = spleeterQueue.shift();
 
   try {
+    const baseName = path.parse(filename).name;
+    const localInput = getTmpPath(filename);
+    const localOutputDir = tmpDir;
+
+    console.log(
+      `Starting Spleeter task for ${filename} (Queue size: ${spleeterQueue.length})`,
+    );
+
     // 1. Download file from GCS to local tmp
     await StorageService.downloadFile(`audio/${filename}`, localInput);
 
@@ -292,59 +301,110 @@ router.post("/separate", async (req, res) => {
     const modelPath = path.join(__dirname, "../pretrained_models");
     const command = `spleeter separate -p ${model} -o "${localOutputDir}" "${localInput}"`;
 
-    exec(
-      command,
-      { env: { ...process.env, MODEL_PATH: modelPath } },
-      async (err, stdout, stderr) => {
-        if (err) {
-          console.error(`Spleeter Error:`, err);
-          return res
-            .status(500)
-            .json({ error: "Spleeter failed", details: err.message });
-        }
+    await new Promise((res_exec, rej_exec) => {
+      exec(
+        command,
+        { env: { ...process.env, MODEL_PATH: modelPath } },
+        async (err, stdout, stderr) => {
+          const stemDir = getTmpPath(baseName);
+          try {
+            if (err) {
+              console.error(`Spleeter Error for ${filename}:`, err);
+              rej_exec(new Error(`Spleeter failed: ${err.message}`));
+              return;
+            }
 
-        const stemDir = getTmpPath(baseName);
-        if (fs.existsSync(stemDir)) {
-          const stems = fs
-            .readdirSync(stemDir)
-            .filter((f) => f.endsWith(".wav"));
+            if (fs.existsSync(stemDir)) {
+              const rawStems = fs
+                .readdirSync(stemDir)
+                .filter((f) => f.endsWith(".wav"));
 
-          // 3. Upload stems directly to GCS
-          for (const stem of stems) {
-            await StorageService.uploadFile(
-              path.join(stemDir, stem),
-              `stems/${baseName}/${stem}`,
-            );
+              const mp3Stems = [];
+
+              // 3. Convert to MP3 and Upload to GCS
+              for (const wavStem of rawStems) {
+                const stemBase = path.parse(wavStem).name;
+                const mp3StemName = `${stemBase}.mp3`;
+                const localWavPath = path.join(stemDir, wavStem);
+                const localMp3Path = path.join(stemDir, mp3StemName);
+
+                await new Promise((resolveMp3, rejectMp3) => {
+                  exec(
+                    `ffmpeg -i "${localWavPath}" -codec:a libmp3lame -qscale:a 2 -y "${localMp3Path}"`,
+                    (convErr) => {
+                      if (convErr) rejectMp3(convErr);
+                      else resolveMp3();
+                    },
+                  );
+                });
+
+                await StorageService.uploadFile(
+                  localMp3Path,
+                  `stems/${baseName}/${mp3StemName}`,
+                );
+                mp3Stems.push(mp3StemName);
+              }
+
+              // 4. Update Firestore doc to reflect stems generated
+              await db.collection(FILES_COLLECTION).doc(filename).update({
+                hasStems: true,
+                stems: mp3Stems,
+                stemFolder: baseName,
+              });
+
+              console.log(
+                `Successfully completed Spleeter task for ${filename}`,
+              );
+              res_exec({ message: "Success", folder: baseName });
+            } else {
+              rej_exec(new Error("Stem output directory not found locally"));
+            }
+          } catch (e) {
+            rej_exec(e);
+          } finally {
+            // Cleanup local temp
+            if (fs.existsSync(stemDir)) {
+              fs.rmSync(stemDir, { recursive: true, force: true });
+            }
+            if (fs.existsSync(localInput)) {
+              fs.unlinkSync(localInput);
+            }
           }
-
-          // 4. Update Firestore doc to reflect stems generated
-          await db.collection(FILES_COLLECTION).doc(filename).update({
-            hasStems: true,
-            stems: stems,
-            stemFolder: baseName,
-          });
-
-          // 5. Cleanup
-          fs.rmSync(stemDir, { recursive: true, force: true });
-          fs.unlinkSync(localInput);
-
-          res.json({
-            message: "Separation complete & uploaded to Cloud Storage",
-            folder: baseName,
-          });
-        } else {
-          res
-            .status(500)
-            .json({ error: "Stem output directory not found locally" });
-        }
-      },
-    );
-  } catch (e) {
-    res.status(500).json({
-      error: "Failed infrastructure logic for spleeter",
-      details: e.message,
+        },
+      );
     });
+
+    resolve({
+      message: "Separation complete & uploaded to Cloud Storage",
+      folder: baseName,
+    });
+  } catch (err) {
+    console.error(`Spleeter task failed for ${filename}:`, err);
+    reject(err);
+  } finally {
+    isProcessingSpleeter = false;
+    processSpleeterQueue(); // Process next in queue
   }
+};
+
+// --- ROUTES ---
+
+// --- SPLEETER (DOWNLOAD FROM GCS -> LOCAL SPLEET -> UPLOAD GCS) ---
+router.post("/separate", async (req, res) => {
+  const { filename, model = "spleeter:5stems" } = req.body;
+  if (!filename) return res.status(400).json({ error: "Filename required" });
+
+  // Enqueue the task
+  new Promise((resolve, reject) => {
+    spleeterQueue.push({ filename, model, resolve, reject });
+    processSpleeterQueue();
+  })
+    .then((result) => res.json(result))
+    .catch((err) =>
+      res
+        .status(500)
+        .json({ error: "Separation failed", details: err.message }),
+    );
 });
 
 // --- PITCH SHIFT AUDIO (DOWNLOAD -> FFMPEG -> UPLOAD GCS) ---
@@ -476,6 +536,30 @@ router.get("/chords/:filename", async (req, res) => {
     res.json(JSON.parse(fileContent.toString("utf8")));
   } catch (e) {
     res.json(null); // Return null if chords don't exist yet, matching previous behavior
+  }
+});
+
+// --- DELETE STEMS ONLY ---
+router.delete("/files/:filename/stems", async (req, res) => {
+  const { filename } = req.params;
+  const baseName = path.parse(filename).name;
+
+  try {
+    // 1. Delete Stems Folder from GCS
+    await StorageService.deleteFolder(`stems/${baseName}/`);
+
+    // 2. Update Firestore doc to reset stem metadata
+    await db.collection(FILES_COLLECTION).doc(filename).update({
+      hasStems: false,
+      stems: [],
+      stemFolder: null,
+    });
+
+    res.json({ message: "Stems deleted, main audio preserved." });
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: "Failed to delete stems", details: e.message });
   }
 });
 

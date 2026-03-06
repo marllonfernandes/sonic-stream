@@ -15,17 +15,25 @@ const props = defineProps({
 const emit = defineEmits(['update:isPlaying', 'next', 'prev', 'back']);
 
 // State
-const audio = ref(null); // Single track fallback
-const stems = ref({}); // { vocals: Audio, drums: Audio, ... }
-const stemVolumes = ref({}); // { vocals: 100, drums: 100, ... }
-const stemMuted = ref({}); // { vocals: false, ... }
-const stemSolo = ref({}); // { vocals: false, ... }
+const audioContext = ref(null);
+const audioBuffers = ref({}); // { trackId: AudioBuffer }
+const sourceNodes = ref({}); // { trackId: AudioBufferSourceNode }
+const gainNodes = ref({}); // { trackId: GainNode }
+const masterGain = ref(null);
 
 const currentTime = ref(0);
 const duration = ref(0);
 const loading = ref(false);
 const chords = ref(null);
 const chordsLoading = ref(false);
+
+const startTime = ref(0); // context time when play was clicked
+const offsetTime = ref(0); // time into the song in seconds
+const timerId = ref(null);
+
+const stemVolumes = ref({}); // { vocals: 100, drums: 100, ... }
+const stemMuted = ref({}); // { vocals: false, ... }
+const stemSolo = ref({}); // { vocals: false, ... }
 
 const currentChord = computed(() => {
     if (!chords.value) return null;
@@ -77,14 +85,14 @@ const tracks = computed(() => {
 
     if (hasStems.value && props.file.stems) {
         // Sort stems to consistent order if needed
-        // Expected: vocals, drums, bass, piano, other
-        const order = ['vocals.wav', 'drums.wav', 'bass.wav', 'piano.wav', 'other.wav'];
+        // Expected: vocals.mp3, drums.mp3, bass.mp3, piano.mp3, other.mp3
+        const order = ['vocals.mp3', 'drums.mp3', 'bass.mp3', 'piano.mp3', 'other.mp3'];
         const files = [...props.file.stems].sort((a, b) => {
             return order.indexOf(a) - order.indexOf(b);
         });
 
         return files.map(f => {
-            const name = f.replace('.wav', '');
+            const name = f.replace('.mp3', '');
             return {
                 id: name,
                 name: name,
@@ -120,76 +128,112 @@ onMounted(async () => {
 });
 
 // Methods
+const initAudioContext = () => {
+    if (!audioContext.value) {
+        audioContext.value = new (window.AudioContext || window.webkitAudioContext)();
+        masterGain.value = audioContext.value.createGain();
+        masterGain.value.connect(audioContext.value.destination);
+    }
+};
+
+const fetchAudioBuffer = async (url) => {
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    return await audioContext.value.decodeAudioData(arrayBuffer);
+};
+
 const loadAudio = async (file) => {
     loading.value = true;
+    initAudioContext();
     try {
+        const tracksToLoad = [];
         if (file.hasStems && file.stems) {
-            // Load Stems
-            const stemObj = {};
-            const volObj = {};
-            const muteObj = {};
-            const soloObj = {};
-
-            // We need to load at least one to get duration
-            const promises = file.stems.map(async (stemFile) => {
-                const name = stemFile.replace('.wav', '');
-                const url = `/api/stems/${encodeURIComponent(file.stemFolder)}/${stemFile}`;
-                const audioEl = new Audio(url);
-                stemObj[name] = audioEl;
-                volObj[name] = 80; // Default volume
-                muteObj[name] = false;
-                soloObj[name] = false;
-
-                // Preload
-                audioEl.preload = 'metadata';
+            file.stems.forEach(s => {
+                const name = s.replace('.mp3', '');
+                tracksToLoad.push({ id: name, url: `/api/stems/${encodeURIComponent(file.stemFolder)}/${s}` });
             });
-
-            await Promise.all(promises);
-
-            stems.value = stemObj;
-            stemVolumes.value = volObj;
-            stemMuted.value = muteObj;
-            stemSolo.value = soloObj;
-
-            // Setup listeners on the first stem (usually vocals)
-            const leader = Object.values(stems.value)[0];
-            if (leader) setupListeners(leader);
-
         } else {
-            // Single file
-            audio.value = new Audio(file.url);
-            setupListeners(audio.value);
-            stemVolumes.value = { original: 100 };
-            stemMuted.value = { original: false };
-            stemSolo.value = { original: false };
+            tracksToLoad.push({ id: 'original', url: file.url });
         }
+
+        const promises = tracksToLoad.map(async (t) => {
+            const buffer = await fetchAudioBuffer(t.url);
+            audioBuffers.value[t.id] = buffer;
+            
+            const gain = audioContext.value.createGain();
+            gain.connect(masterGain.value);
+            gainNodes.value[t.id] = gain;
+            
+            stemVolumes.value[t.id] = 80;
+            stemMuted.value[t.id] = false;
+            stemSolo.value[t.id] = false;
+        });
+
+        await Promise.all(promises);
+        
+        const firstBuffer = Object.values(audioBuffers.value)[0];
+        duration.value = firstBuffer ? firstBuffer.duration : 0;
+        
+        updateAllVolumes();
     } catch (e) {
-        console.error("Failed to load audio", e);
+        console.error("Failed to load audio with Web Audio API", e);
     } finally {
         loading.value = false;
     }
 };
 
-const setupListeners = (audioEl) => {
-    audioEl.addEventListener('timeupdate', () => {
-        currentTime.value = audioEl.currentTime;
+const stopSourceNodes = () => {
+    Object.values(sourceNodes.value).forEach(source => {
+        try { source.stop(); } catch(e) {}
     });
-    audioEl.addEventListener('loadedmetadata', () => {
-        duration.value = audioEl.duration;
-    });
-    audioEl.addEventListener('ended', () => {
-        emit('update:isPlaying', false);
-        // Reset or loop?
-    });
+    sourceNodes.value = {};
+};
+
+const startTimer = () => {
+    stopTimer();
+    const update = () => {
+        if (!props.isPlaying) return;
+        const elapsed = audioContext.value.currentTime - startTime.value;
+        currentTime.value = Math.min(offsetTime.value + elapsed, duration.value);
+        
+        if (currentTime.value >= duration.value) {
+            emit('update:isPlaying', false);
+            stopTimer();
+        } else {
+            timerId.value = requestAnimationFrame(update);
+        }
+    };
+    timerId.value = requestAnimationFrame(update);
+};
+
+const stopTimer = () => {
+    if (timerId.value) {
+        cancelAnimationFrame(timerId.value);
+        timerId.value = null;
+    }
 };
 
 const play = async () => {
+    if (!audioContext.value) return;
     try {
-        if (hasStems.value) {
-            await Promise.all(Object.values(stems.value).map(s => s.play()));
-        } else if (audio.value) {
-            await audio.value.play();
+        if (audioContext.value.state === 'suspended') {
+            await audioContext.value.resume();
         }
+        
+        stopSourceNodes();
+        
+        const now = audioContext.value.currentTime;
+        startTime.value = now;
+        
+        Object.keys(audioBuffers.value).forEach(id => {
+            const source = audioContext.value.createBufferSource();
+            source.buffer = audioBuffers.value[id];
+            source.connect(gainNodes.value[id]);
+            source.start(0, offsetTime.value);
+            sourceNodes.value[id] = source;
+        });
+        
+        startTimer();
         emit('update:isPlaying', true);
     } catch (e) {
         console.error("Play error", e);
@@ -197,31 +241,37 @@ const play = async () => {
 };
 
 const pause = () => {
-    if (hasStems.value) {
-        Object.values(stems.value).forEach(s => s.pause());
-    } else if (audio.value) {
-        audio.value.pause();
-    }
+    if (!audioContext.value) return;
+    const elapsed = audioContext.value.currentTime - startTime.value;
+    offsetTime.value = Math.min(offsetTime.value + elapsed, duration.value);
+    
+    stopSourceNodes();
+    stopTimer();
     emit('update:isPlaying', false);
 };
 
 const stopAll = () => {
     pause();
-    if (audio.value) {
-        audio.value.src = '';
-        audio.value = null;
-    }
-    stems.value = {};
+    audioBuffers.value = {};
+    gainNodes.value = {};
+    sourceNodes.value = {};
     currentTime.value = 0;
     duration.value = 0;
+    offsetTime.value = 0;
 };
 
 const seek = (time) => {
+    const wasPlaying = props.isPlaying;
+    if (wasPlaying) {
+        stopSourceNodes();
+        stopTimer();
+    }
+    
+    offsetTime.value = time;
     currentTime.value = time;
-    if (hasStems.value) {
-        Object.values(stems.value).forEach(s => s.currentTime = time);
-    } else if (audio.value) {
-        audio.value.currentTime = time;
+    
+    if (wasPlaying) {
+        play();
     }
 };
 
@@ -243,14 +293,12 @@ const toggleSolo = (id) => {
 };
 
 const updateAllVolumes = () => {
-    if (hasStems.value) {
-        Object.keys(stems.value).forEach(id => applyVolume(id));
-    } else {
-        applyVolume('original');
-    }
+    Object.keys(gainNodes.value).forEach(id => applyVolume(id));
 };
 
 const applyVolume = (id) => {
+    if (!gainNodes.value[id] || !audioContext.value) return;
+
     const vol = stemVolumes.value[id] / 100;
     const isMuted = stemMuted.value[id];
     const isSolo = stemSolo.value[id];
@@ -263,17 +311,13 @@ const applyVolume = (id) => {
     if (isMuted) {
         finalVol = 0;
     } else if (anySolo) {
-        // If there are solo tracks, and this one IS NOT soloed, mute it
         if (!isSolo) {
             finalVol = 0;
         }
     }
 
-    if (hasStems.value && stems.value[id]) {
-        stems.value[id].volume = finalVol;
-    } else if (id === 'original' && audio.value) {
-        audio.value.volume = finalVol;
-    }
+    // Smooth transition
+    gainNodes.value[id].gain.setTargetAtTime(finalVol, audioContext.value.currentTime, 0.02);
 };
 
 onUnmounted(() => {

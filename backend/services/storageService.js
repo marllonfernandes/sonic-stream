@@ -89,8 +89,9 @@ const StorageService = {
   // Delete all files in a "folder"
   deleteFolder: async (prefix) => {
     try {
+      console.log(`Attempting to delete all files with prefix: ${prefix}`);
       await bucket.deleteFiles({ prefix });
-      console.log(`Deleted folder ${prefix}`);
+      console.log(`Successfully deleted all files with prefix: ${prefix}`);
       return true;
     } catch (e) {
       console.error(`Error deleting folder ${prefix}:`, e);

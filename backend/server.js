@@ -2,6 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const apiRoutes = require("./routes/api");
+const eventsApiRoutes = require("./routes/eventsApi");
+const participantsApiRoutes = require("./routes/participantsApi");
+const wishlistApiRoutes = require("./routes/wishlistApi");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,6 +20,9 @@ app.use((req, res, next) => {
 
 // API Routes FIRST
 app.use("/api", apiRoutes);
+app.use("/api", eventsApiRoutes);
+app.use("/api", participantsApiRoutes);
+app.use("/api/wishlist", wishlistApiRoutes);
 
 // Static files
 app.use(express.static(path.join(__dirname, "public")));
