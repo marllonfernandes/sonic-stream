@@ -429,8 +429,9 @@ router.post("/process/pitch", async (req, res) => {
     // 2. Process with ffmpeg
     const scale = Math.pow(2, semitones / 12);
     const command = `ffmpeg -i "${localInput}" -af "rubberband=pitch=${scale}" -y "${localOutput}"`;
+    const newPath = `/opt/homebrew/bin:${process.env.PATH}`;
 
-    exec(command, async (err) => {
+    exec(command, { env: { ...process.env, PATH: newPath } }, async (err) => {
       if (err) {
         console.error("FFMPEG error:", err);
         return res.status(500).json({ error: "Pitch shift failed" });

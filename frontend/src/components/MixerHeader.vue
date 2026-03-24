@@ -48,6 +48,25 @@ const applyPitch = async () => {
     }
 };
 
+const downloadFile = async () => {
+    try {
+        const response = await fetch(`/api/stream/${encodeURIComponent(props.title)}`);
+        if (!response.ok) throw new Error('Download failed');
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = props.title;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (error) {
+        console.error("Error downloading file", error);
+        alert("Failed to download file");
+    }
+};
+
 </script>
 
 <template>
@@ -63,7 +82,7 @@ const applyPitch = async () => {
                 <Button icon="pi pi-sort-alt" text rounded severity="secondary" @click="pitchVisible = true"
                     v-tooltip="'Pitch Shift'" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
                 <Button icon="pi pi-refresh" text rounded severity="secondary" @click="$emit('refresh')" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
-                <Button icon="pi pi-download" text rounded severity="secondary" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
+                <Button icon="pi pi-download" text rounded severity="secondary" @click="downloadFile" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
                 <Button icon="pi pi-bars" text rounded severity="secondary" class="!w-8 !h-8 !p-0 sm:!w-10 sm:!h-10" />
             </div>
         </div>
